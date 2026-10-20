@@ -1,4 +1,5 @@
-import { MASTER_URL, SERIES } from "./config";
+import { SERIES } from "./config";
+import { четиОбекти } from "./master";
 import { db } from "./db";
 import { ensureFresh } from "./sync";
 import { digits, dkey, linieAdd, norm, num2, r2 } from "./util";
@@ -7,11 +8,7 @@ export async function healthCheck() {
   const reg = await db().collection("РЕГИСТЪР").find({ "Статус": "активен" }).toArray();
   const art = await db().collection("АРТИКУЛИ").find({}).toArray();
   const dost = await db().collection("РЕГИСТЪР_ДОСТАВКИ").find({ "Статус": "активен" }).toArray();
-  let objs: any[] = [];
-  try {
-    const r = await fetch(MASTER_URL, { redirect: "follow" });
-    if (r.ok) { const m = await r.json(); objs = m.objects || m || []; }
-  } catch {}
+  const { обекти: objs, източник: изтОбекти } = await четиОбекти();
   const known = new Set(objs.map((o: any) => norm(o.obekt)));
   const seen: any = {}, dupNums: string[] = [];
   reg.forEach((r: any) => { const n = r._n; if (!n) return; if (seen[n]) dupNums.push(n); seen[n] = 1; });
@@ -49,7 +46,7 @@ export async function healthCheck() {
   return {
     чисто: Object.keys(findings).length === 0,
     проверени: { документи: reg.length, артикулни_реда: art.length, доставки: dost.length,
-                 обекти_в_master: objs.length },
+                 обекти_в_master: objs.length, обектите_идват_от: изтОбекти },
     находки: findings,
   };
 }
@@ -102,11 +99,7 @@ export async function dailyCheck(from: string, to: string) {
   }
   if (неравни.length) находки["фактура и стокова с различни суми"] = неравни.slice(0, 30);
 
-  let objs: any[] = [];
-  try {
-    const r = await fetch(MASTER_URL, { redirect: "follow" });
-    if (r.ok) { const m = await r.json(); objs = m.objects || m || []; }
-  } catch {}
+  const { обекти: objs, източник: изтОбекти } = await четиОбекти();
   if (objs.length) {
     const byObj: any = {};
     objs.forEach((o: any) => { byObj[norm(o.obekt)] = o; });
@@ -126,6 +119,11 @@ export async function dailyCheck(from: string, to: string) {
     const сбито: any = {};
     for (const k of Object.keys(без)) сбито[k] = { брой: без[k].length, примери: без[k].slice(0, 5) };
     if (Object.keys(сбито).length) находки["издадени без реквизити"] = сбито;
+  } else {
+    // Мълчаливото прескачане правеше справката по-чиста от истината.
+    находки["проверката за реквизити не е направена"] =
+      "обектите не бяха достъпни (нито в базата, нито на публичния адрес), " +
+      "затова 'издадени без реквизити' и 'непознат обект' НЕ са проверени.";
   }
 
   await ensureFresh("НОМЕРАЦИЯ", true);
@@ -148,9 +146,27 @@ export async function dailyCheck(from: string, to: string) {
   const провали = (log?.["провали"] || []).slice(-3);
   if (провали.length) находки["последни провали на огледалото"] = провали;
 
+  // 300-партидите: ден с активни документи на обект "300 ..." трябва да има
+  // свой ред в ПРАТЕНИ_300. Няма ли го - доставката не е изпратена.
+  await ensureFresh("ПРАТЕНИ_300", true);
+  const пратени = await db().collection("ПРАТЕНИ_300").find({}).toArray();
+  const пратениДни = new Set(
+    (пратени as any[]).map(r => dkey(String(r["Дата_доставка"] || ""))).filter(Boolean));
+  const дни300: Record<string, number> = {};
+  reg.forEach((r: any) => {
+    if (!String(r["Обект"] || "").trim().startsWith("300")) return;
+    const d = dkey(String(r["Дата"] || ""));
+    if (d) дни300[d] = (дни300[d] || 0) + 1;
+  });
+  const непратени = Object.keys(дни300).sort()
+    .filter(d => !пратениДни.has(d))
+    .map(d => `${d}: ${дни300[d]} документа на обекти 300, но няма ред в ПРАТЕНИ_300`);
+  if (непратени.length) находки["300 не са изпратени"] = непратени;
+
   return {
     период: { от: from || "(всичко)", до: to || "(всичко)" },
-    проверени: { документи: reg.length, артикулни_реда: art.length },
+    проверени: { документи: reg.length, артикулни_реда: art.length,
+                 обектите_идват_от: изтОбекти },
     чисто: Object.keys(находки).length === 0,
     находки,
   };

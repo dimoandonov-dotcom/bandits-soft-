@@ -10,6 +10,7 @@ import { reserveNums, seedCounters } from "./numbers";
 import { dailyCheck, healthCheck } from "./reports";
 import { addRows, setRow, stashGet, stashPut } from "./sheetops";
 import { addStokovi, непокрити } from "./stokovi";
+import { запишиОбекти, четиОбекти } from "./master";
 import { ensureFresh, sweepTemp, syncTab } from "./sync";
 import { digits, dkey } from "./util";
 
@@ -32,8 +33,10 @@ function buildQuery(tab: string, p: URLSearchParams) {
   return q;
 }
 
+// Беше "*". Стеснено до страницата; ALLOW_ORIGIN може да го смени,
+// а ALLOW_ORIGIN="*" връща старото поведение, ако дотрябва.
 const CORS = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": process.env.ALLOW_ORIGIN || "https://bandits-import.netlify.app",
   "Access-Control-Allow-Headers": "content-type,x-bandits-key",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
 };
@@ -184,7 +187,7 @@ export default {
         return json({ ok: true, ...(await дедПлан(дата, body.items)) });
       }
 
-      if (u.pathname === "/counters") return json({ ok: true, counters: await db().collection("counters").find({}).toArray() });
+      if (u.pathname === "/counters") { guard(); return json({ ok: true, counters: await db().collection("counters").find({}).toArray() }); }
       if (u.pathname === "/counters/seed") { guard(); return json({ ok: true, seeded: await seedCounters() }); }
 
       if (u.pathname === "/number") {
@@ -206,6 +209,7 @@ export default {
       if (u.pathname === "/mirror/flush") { guard(); return json({ ok: true, ...(await flushMirror(Number(arg("limit") || 200))) }); }
 
       if (u.pathname === "/mirror") {
+        guard();
         const pend = await db().collection("_mirror")
           .find({ готово: false }).sort({ при: 1 }).limit(Number(u.searchParams.get("limit") || 50)).toArray();
         const log: any = await db().collection("_meta").findOne({ _id: "огледало" as any });
@@ -216,7 +220,20 @@ export default {
           последни_провали: (log?.["провали"] || []).slice(-3) });
       }
 
+      // Обектите в базата, за да не зависят проверките от публичния master.json.
+      if (u.pathname === "/master") {
+        if (req.method === "POST") {
+          guard();
+          return json({ ok: true, записани: await запишиОбекти(body.objects || body) });
+        }
+        const { обекти, източник } = await четиОбекти();
+        return json({ ok: true, брой: обекти.length, източник });
+      }
+
       if (u.pathname === "/sheet") {
+        // Страницата още вика /sheet БЕЗ ключ (т. 5 го изнася в Netlify функция).
+        // Затова ключът тук се пали чак когато страницата е готова: SHEET_KEY=1.
+        if (process.env.SHEET_KEY === "1") guard();
         const tab = String(arg("name") || "");
         if (!TABS.includes(tab)) return json({ error: `непозната таблица ${tab}` }, 400);
         const synced = await ensureFresh(tab, u.searchParams.get("fresh") === "1");
