@@ -59,7 +59,11 @@ for nm, t in mods.items():
     imported = set()
     for ids, src in IMP.findall(t):
         imported |= {x.strip() for x in ids.split(",") if x.strip()}
-    used = set(WORD.findall(strip_keep_interp(t)))
+    # „...“ се маха ПРЕДИ разпознаването на имената. WORD нарочно пропуска име,
+    # пред което стои точка (обект.свойство), но третата точка на оператора за
+    # разгъване изглежда точно така — затова `...netLine(l)` и `...artRows(...)`
+    # оставаха невидими и липсващите им import-и не бяха хванати (21.10.2026).
+    used = set(WORD.findall(strip_keep_interp(t).replace("...", "   ")))
     for w in sorted(used):
         if w in defs and defs[w] != nm and w not in imported and w not in mine[nm]:
             проблеми.append((nm, w, defs[w]))

@@ -1,8 +1,8 @@
 import { db } from "./db";
 import { gasCall, gasReserve } from "./gas";
-import { putDocs, regRow } from "./issue";
+import { artRows, netLine, putDocs, regRow } from "./issue";
 import { ensureFresh, fetchTabChecked } from "./sync";
-import { dkey, pad10, r2 } from "./util";
+import { digits, dkey, pad10, r2 } from "./util";
 
 const ИЗДАДЕНИ_КИ = "ИЗДАДЕНИ_КИ";
 
@@ -38,16 +38,31 @@ export async function issueCredits(body: any, dry: boolean) {
     if (c["зает"]) return { duplicate: true, loadedAt: c["кога"],
       съобщение: `Този файл с връщания вече е издаден на ${c["кога"]} - нищо не е записано повторно.` };
   }
+  // От заключването нататък всичко е в try: при изключение файлът се отключва.
+  // Иначе остава заключен завинаги и не може да се пусне повторно - точно това
+  // стана на 21.10.2026, когато `netLine` липсваше и функцията гръмна тук.
+  try {
+    return await издай();
+  } catch (e) {
+    if (sourceId && !dry)
+      await db().collection("_издадени_ки").deleteOne({ _id: sourceId as any }).catch(() => {});
+    throw e;
+  }
 
+  async function издай() {
   if (!dry) await ensureFresh("РЕГИСТЪР", true);
   const day = await db().collection("РЕГИСТЪР").find({ _d: dkey(date) }).toArray();
   let order = 0;
   day.forEach((r: any) => { const v = Number(r["Ред"]) || 0; if (v > order) order = v; });
 
-  const nums = dry ? notes.map((_, i) => `нов-11-${i + 1}`) : await gasReserve("11", notes.length, date);
+  // Номерата се вземат ЧАК СЛЕД като всичко е построено - виж замениНомер по-долу.
+  // Дотогава редовете носят запазено място. Преди номерата се заделяха тук и при
+  // всеки провал се изяждаха безвъзвратно (11 броя на 21.10.2026).
+  const ЗАПАЗЕНО = (i: number) => `@11#${i}`;
+  const nums = notes.map((_, i) => dry ? `нов-11-${i + 1}` : ЗАПАЗЕНО(i));
   const newReg: any[] = [], newArt: any[] = [], written: any[] = [];
   notes.forEach((n: any, i: number) => {
-    const num = dry ? nums[i] : pad10(nums[i]);
+    const num = nums[i];
     const netLines = (n.lines || []).map((l: any) => ({ ...netLine(l), partida: "" }));
     const base = r2(netLines.reduce((a: number, l: any) => a + l.sum, 0));
     const vat = r2(base * 0.2);
@@ -63,6 +78,18 @@ export async function issueCredits(body: any, dry: boolean) {
                  артикулни_реда: newArt.length, сума: сума, ред_до: order };
   if (dry) return { сухо: true, ...итог, written, регистър: newReg, артикули: newArt };
 
+  // Истинските номера - подменя се и `_n`, иначе редът остава с отпечатък от
+  // запазеното място и не се познава по номер.
+  const реални = await gasReserve("11", notes.length, date);
+  const карта = new Map<string, string>();
+  nums.forEach((z, i) => карта.set(z, pad10(реални[i])));
+  const см = (v: any) => карта.get(String(v)) ?? v;
+  [...newReg, ...newArt].forEach((x: any) => { x["Номер"] = см(x["Номер"]); x._n = digits(x["Номер"]); });
+  written.forEach((w: any) => { w.num = см(w.num); });
+  const остатък = [...newReg, ...newArt].filter((x: any) => /^@11#/.test(String(x["Номер"])));
+  if (остатък.length)
+    throw new Error(`${остатък.length} реда останаха без номер - спирам, нищо не е записано.`);
+
   const res: any = await putDocs(newReg, newArt);
   if (sourceId) {
     if (!res.ok) await db().collection("_издадени_ки").deleteOne({ _id: sourceId as any }).catch(() => {});
@@ -77,4 +104,5 @@ export async function issueCredits(body: any, dry: boolean) {
     }
   }
   return { истината_е: "листовете", ...итог, written, ...res };
+  }
 }
