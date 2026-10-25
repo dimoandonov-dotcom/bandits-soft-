@@ -1,7 +1,6 @@
 import { fetchTab } from "./sync";
 import { digits } from "./util";
 
-const ПРАЗНО_ПОВИКВАНЕ = /Липсва action|нечетим отговор/i;
 async function gasOnce(action: string, extra: any) {
   const url = process.env.GAS_URL;
   if (!url) throw new Error("липсва GAS_URL - не знам накъде да пиша.");
@@ -15,13 +14,26 @@ async function gasOnce(action: string, extra: any) {
   if (res?.error || inner?.error) throw new Error(`${action}: ${res?.error || inner?.error}`);
   return inner;
 }
+// БЕЗ повторен опит - нарочно.
+//
+// Дотук при „Липсва action" се чакаше 1.5 сек и се пробваше пак. Това има
+// смисъл само ако първият опит НЕ е направил нищо. Но през gasCall минават
+// единствено ЗАПИСИ - reserveNumbers и mirrorApply, нито едно четене. А
+// „Липсва action" значи, че Google е пренасочил заявката и отговорът се е
+// загубил; дали записът е минал, оттук не се вижда. Минал ли е, повторният
+// опит го прави ВТОРИ ПЪТ.
+//
+// Точно така на 25.10.2026 редовете на цялата дневна заявка влязоха по два
+// пъти в листа АРТИКУЛИ: 54 от 68 документа, 736 излишни реда, всеки
+// документ с двойна сума при печат. Сумите в регистъра си останаха верни,
+// затова нищо не изгърмя - видя се чак на екрана за печат.
+//
+// Затова: един опит. Провали ли се, човекът вижда грешката и пуска наново -
+// а повторното пускане е безопасно, защото номерата се взимат чак накрая и
+// при провал нищо не е записано. По-добре да падне на видно място, отколкото
+// да се удвои тихо.
 export async function gasCall(action: string, extra: any) {
-  try { return await gasOnce(action, extra); }
-  catch (e: any) {
-    if (!ПРАЗНО_ПОВИКВАНЕ.test(String(e?.message || e))) throw e;
-    await new Promise(s => setTimeout(s, 1500));
-    return await gasOnce(action, extra);
-  }
+  return await gasOnce(action, extra);
 }
 
 export async function gasReserve(series: string, n: number, docDate: string): Promise<string[]> {

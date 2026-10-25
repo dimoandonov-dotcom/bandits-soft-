@@ -273,8 +273,11 @@ async function провериЗапис(newReg: any[], newArt: any[], w: any) {
   const v = await verifyInSheets(nums, !всичкоМина);
   const липсващи = nums.filter(n => !((v["регистър"] as any)[digits(n)] >= 1));
   const двойни = nums.filter(n => ((v["регистър"] as any)[digits(n)] || 0) > 1);
+  // „различно", не „по-малко": липсващите редове се виждаха, а ПОВЕЧЕТО -
+  // не. Точно повечето бяха бедата на 25.10.2026 (всеки документ с двойни
+  // редове и двойна сума при печат), а проверката мълчеше.
   const артикулни = всичкоМина ? [] : Object.keys(очаквани)
-    .filter(k => ((v["артикули"] as any)[k] || 0) < очаквани[k])
+    .filter(k => ((v["артикули"] as any)[k] || 0) !== очаквани[k])
     .map(k => `${k}: очаквам ${очаквани[k]} реда, в листа са ${(v["артикули"] as any)[k] || 0}`);
   for (const t of ["РЕГИСТЪР", "АРТИКУЛИ"])
     await db().collection("_meta").updateOne({ _id: t as any },
