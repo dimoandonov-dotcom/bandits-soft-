@@ -1,4 +1,5 @@
 import { TABS } from "./config";
+import { вход, провериСесия } from "./auth";
 import { issueCredits } from "./credits";
 import { conn, db, mode } from "./db";
 import { дедПлан, дедРевизия } from "./deduction";
@@ -53,10 +54,27 @@ export default {
       const arg = (k: string) => (body[k] !== undefined ? body[k] : u.searchParams.get(k));
       const want = process.env.WRITE_KEY || "";
       const given = req.headers.get("x-bandits-key") || String(arg("key_") || "");
+      // 16.11.2026: освен стария ключ (задачите по график) се приема и сесиен ключ от входа.
+      const сесия = провериСесия(given);
       const guard = () => {
+        if (сесия) return;
         if (!want) throw new Error("WRITE_KEY не е зададен на услугата - писането е спряно.");
-        if (given !== want) throw new Error("грешен или липсващ ключ.");
+        if (given !== want) throw new Error("нужен е вход (грешен или липсващ ключ).");
       };
+      // Четенето се заключва със SHEET_KEY=1 — тогава и /sheet, /daily, /check искат вход.
+      const четене = () => { if (process.env.SHEET_KEY === "1") guard(); };
+
+      if (u.pathname === "/login" && req.method === "POST") {
+        const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "?";
+        const r: any = вход(body.user, body.pass, ip);
+        if (r.error) return json(r, 401);
+        return json({ ...r, gas: process.env.GAS_URL || "", zayavki: process.env.ZAYAVKI_URL || "",
+          data: process.env.DATA_PATH || "", gasKey: process.env.GAS_KEY || "" });
+      }
+      if (u.pathname === "/me") {
+        if (!сесия) return json({ error: "няма вход" }, 401);
+        return json({ ok: true, ...сесия });
+      }
 
       if (u.pathname === "/" || u.pathname === "/health") {
         const meta = await db().collection("_meta").find({ _id: { $in: TABS } } as any).toArray();
@@ -70,9 +88,10 @@ export default {
           чакат_огледало: pending });
       }
 
-      if (u.pathname === "/check") return json({ ok: true, ...(await healthCheck()) });
+      if (u.pathname === "/check") { четене(); return json({ ok: true, ...(await healthCheck()) }); }
 
       if (u.pathname === "/daily") {
+        четене();
         const arg2 = (k: string) => String(u.searchParams.get(k) || "");
         let from = arg2("from");
         if (!from && !arg2("to")) {           // по подразбиране: последните 3 дни
@@ -226,6 +245,7 @@ export default {
           guard();
           return json({ ok: true, записани: await запишиОбекти(body.objects || body) });
         }
+        четене();
         const { обекти, източник } = await четиОбекти();
         return json({ ok: true, брой: обекти.length, източник });
       }
@@ -233,7 +253,7 @@ export default {
       if (u.pathname === "/sheet") {
         // Страницата още вика /sheet БЕЗ ключ (т. 5 го изнася в Netlify функция).
         // Затова ключът тук се пали чак когато страницата е готова: SHEET_KEY=1.
-        if (process.env.SHEET_KEY === "1") guard();
+        четене();
         const tab = String(arg("name") || "");
         if (!TABS.includes(tab)) return json({ error: `непозната таблица ${tab}` }, 400);
         const synced = await ensureFresh(tab, u.searchParams.get("fresh") === "1");

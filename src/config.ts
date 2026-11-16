@@ -1,5 +1,5 @@
 export const SHEET_ID = "1Y8Pv-H6mbc8ZU2SvNrHp2nBNnSrxgPnPE8zVx9s7h1A";
-export const MASTER_URL = "https://bandits-import.netlify.app/master.json";
+export const MASTER_URL = process.env.MASTER_URL || "https://bandits-import.netlify.app/master.json";
 export const DB_NAME  = "bandits";
 export const TABS     = ["РЕГИСТЪР", "АРТИКУЛИ", "ПАРТНЬОРИ", "РЕГИСТЪР_ДОСТАВКИ",
                   "НОМЕРАЦИЯ", "ПРАТЕНИ_300", "ИЗДАДЕНИ_КИ"];
