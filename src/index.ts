@@ -250,6 +250,28 @@ export default {
         return json({ ok: true, брой: обекти.length, източник });
       }
 
+      // Сверка: дават ли публичният CSV и Apps Script еднакви редове (преди затваряне на листа).
+      if (u.pathname === "/compare") {
+        guard();
+        const { редовеПрезCSV, редовеПрезGAS } = await import("./sync");
+        const out: any = {};
+        for (const t of TABS) {
+          try {
+            const a = await редовеПрезCSV(t), b = await редовеПрезGAS(t);
+            const trim = (rs: string[][]) => rs.map(r => { const x = r.map(c => String(c).trim()); while (x.length && x[x.length-1] === "") x.pop(); return x; })
+              .filter((r, i) => i === 0 || r.length);
+            const A = trim(a), B = trim(b);
+            const разлики: any[] = [];
+            for (let i = 0; i < Math.max(A.length, B.length) && разлики.length < 5; i++) {
+              const x = JSON.stringify(A[i] || []), y = JSON.stringify(B[i] || []);
+              if (x !== y) разлики.push({ ред: i + 1, csv: A[i], gas: B[i] });
+            }
+            out[t] = { csv: A.length, gas: B.length, разлики };
+          } catch (e: any) { out[t] = { error: String(e?.message || e) }; }
+        }
+        return json({ ok: true, ...out });
+      }
+
       if (u.pathname === "/sheet") {
         // Страницата още вика /sheet БЕЗ ключ (т. 5 го изнася в Netlify функция).
         // Затова ключът тук се пали чак когато страницата е готова: SHEET_KEY=1.

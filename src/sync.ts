@@ -12,12 +12,34 @@ export async function fetchTabChecked(tab: string, задължителни: str
   return docs;
 }
 
-async function fetchTabFull(tab: string): Promise<{ head: string[]; docs: any[] }> {
+// 16.11.2026: листът се затваря за външни (беше „всеки с линка" — заедно със заплатите).
+// Тогава публичният CSV адрес спира да работи и редовете идват през Apps Script
+// (readTab, с ключ). Превключва се с SHEET_VIA_GAS=1 — чак след като е сверено,
+// че двата пътя дават еднакви редове.
+async function редовеПрезGAS(tab: string): Promise<string[][]> {
+  const url = process.env.GAS_URL;
+  if (!url) throw new Error("липсва GAS_URL");
+  const q = new URLSearchParams({ action: "readTab", name: tab, key_: process.env.GAS_KEY || "", cb: String(Date.now()) });
+  const r = await fetch(`${url}?${q}`, { redirect: "follow" });
+  const txt = await r.text();
+  let j: any;
+  try { j = JSON.parse(txt); } catch { throw new Error(`${tab}: нечетим отговор от Apps Script: ${txt.slice(0, 150)}`); }
+  const inner = j?.result && typeof j.result === "object" ? j.result : j;
+  if (j?.error || inner?.error) throw new Error(`${tab}: ${j?.error || inner?.error}`);
+  if (!Array.isArray(inner?.values)) throw new Error(`${tab}: Apps Script не върна редове.`);
+  return inner.values.map((r: any[]) => r.map(c => (c === null || c === undefined) ? "" : String(c)));
+}
+export async function редовеПрезCSV(tab: string): Promise<string[][]> {
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq`
             + `?tqx=out:csv&sheet=${encodeURIComponent(tab)}&cb=${Date.now()}`;
   const r = await fetch(url, { redirect: "follow" });
   if (!r.ok) throw new Error(`${tab}: HTTP ${r.status} от Google Sheets.`);
-  const rows = parseCSV(await r.text());
+  return parseCSV(await r.text());
+}
+export { редовеПрезGAS };
+
+async function fetchTabFull(tab: string): Promise<{ head: string[]; docs: any[] }> {
+  const rows = process.env.SHEET_VIA_GAS === "1" ? await редовеПрезGAS(tab) : await редовеПрезCSV(tab);
   if (rows.length < 1) throw new Error(`${tab}: празен отговор от Google Sheets.`);
   const head = rows[0].map(h => String(h).trim());
   const docs = rows.slice(1).map((r, i) => {

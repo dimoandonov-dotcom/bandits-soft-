@@ -6,7 +6,7 @@ async function gasOnce(action: string, extra: any) {
   if (!url) throw new Error("липсва GAS_URL - не знам накъде да пиша.");
   const r = await fetch(url, { method: "POST", redirect: "follow",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action, ...extra }) });
+    body: JSON.stringify({ action, ...extra, key_: process.env.GAS_KEY || "" }) });
   const txt = await r.text();
   let res: any;
   try { res = JSON.parse(txt); } catch { throw new Error(`${action}: нечетим отговор: ${txt.slice(0, 200)}`); }

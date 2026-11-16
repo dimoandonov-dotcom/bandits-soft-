@@ -17,7 +17,7 @@ export async function flushMirror(limit = 200) {
   }));
   const r = await fetch(url, { method: "POST", redirect: "follow",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "mirrorApply", items }) });
+    body: JSON.stringify({ action: "mirrorApply", items, key_: process.env.GAS_KEY || "" }) });
   const txt = await r.text();
   let res: any;
   try { res = JSON.parse(txt); } catch { throw new Error(`огледалото върна нечетим отговор: ${txt.slice(0, 200)}`); }
