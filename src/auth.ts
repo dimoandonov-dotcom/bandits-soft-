@@ -31,7 +31,8 @@ const равни = (a: string, b: string) => {
   return x.length === y.length && timingSafeEqual(x, y);
 };
 
-// Срещу налучкване: 8 грешни опита от един адрес за 15 минути → спира.
+// Срещу налучкване: 8 грешни опита за едно име от един адрес за 15 минути → спира само това име.
+// (16.11.2026: беше само по адрес — Дамян сбърка 8 пъти и спря целия офис, и Димо.)
 const ОПИТИ: Record<string, number[]> = {};
 function блокиран(ip: string) {
   const сега = Date.now();
@@ -40,11 +41,12 @@ function блокиран(ip: string) {
 }
 
 export function вход(user: string, pass: string, ip: string) {
-  if (блокиран(ip)) return { error: "Твърде много грешни опити. Опитай пак след 15 минути." };
   const u = String(user || "").trim().toLowerCase();
+  const ключ = `${ip}|${u}`;
+  if (блокиран(ключ)) return { error: "Твърде много грешни опити за това име. Опитай пак след 15 минути." };
   const p = потребители()[u];
   if (!p || !равни(sha(p.salt + String(pass || "")), p.hash)) {
-    (ОПИТИ[ip] = ОПИТИ[ip] || []).push(Date.now());
+    (ОПИТИ[ключ] = ОПИТИ[ключ] || []).push(Date.now());
     return { error: "Грешно име или парола." };
   }
   const exp = Date.now() + ЧАСА_СЕСИЯ * 3600e3;
