@@ -61,8 +61,12 @@ async function syncOnce(tab: string): Promise<number> {
   const tmp = `${tab}__tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   try {
     if (docs.length) {
-      for (let i = 0; i < docs.length; i += 2000)
-        await db().collection(tmp).insertMany(docs.slice(i, i + 2000), { ordered: false });
+      // 18.11.2026: по 4 пакета наведнъж - АРТИКУЛИ (50 000 реда) се записваха пакет
+      // по пакет и само това правеше опресняването над 30 секунди.
+      const пакети: any[][] = [];
+      for (let i = 0; i < docs.length; i += 2000) пакети.push(docs.slice(i, i + 2000));
+      for (let i = 0; i < пакети.length; i += 4)
+        await Promise.all(пакети.slice(i, i + 4).map(п => db().collection(tmp).insertMany(п, { ordered: false })));
     } else {
       await db().createCollection(tmp);
     }
@@ -102,6 +106,24 @@ async function lastSync(tab: string) {
 
 export async function ensureFresh(tab: string, force: boolean) {
   if (await mode() === "стопанин") return null;
-  if (force || Date.now() - (await lastSync(tab)) > STALE_MS) return await syncTab(tab);
-  return null;
+  if (force) {
+    // Току-що опреснено (до 15 сек) - не се прави наново. Иначе повторен опит след
+    // прекъсната връзка пуска второ 30-секундно опресняване веднага след първото.
+    const m0: any = await db().collection("_meta").findOne({ _id: tab as any });
+    if (!SYNCING[tab] && m0?.at && Date.now() - new Date(m0.at).getTime() < 15000) return null;
+    return await syncTab(tab);
+  }
+  // 18.11.2026: обикновеното четене вече не чака пълното опресняване. АРТИКУЛИ са
+  // 50 000 реда - през Apps Script опресняването отнема над половин минута и печатът
+  // от регистъра падаше с „Load failed". Щом в базата вече има данни, отговаря се
+  // веднага с тях, а опресняването тръгва отзад (едно на лист). Всичко, което апито
+  // само записва, и без това е в базата веднага; със „fresh=1" се чака както преди.
+  const m: any = await db().collection("_meta").findOne({ _id: tab as any });
+  const at = m?.at ? new Date(m.at).getTime() : 0;
+  if (Date.now() - at <= STALE_MS) return null;
+  if (at && (m?.rows || 0) > 0) {
+    syncTab(tab).catch(e => console.error(`фоново опресняване ${tab}:`, e?.message || e));
+    return null;
+  }
+  return await syncTab(tab);
 }
